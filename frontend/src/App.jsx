@@ -1,24 +1,32 @@
 // frontend/src/App.jsx
 import { useState, useEffect, useRef } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { ShieldCheck, ShieldAlert, Activity, User } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Activity, User, Lock, Terminal } from 'lucide-react';
 import './App.css';
 
 function App() {
-  const [status, setStatus] = useState("analyzing"); // analyzing | human | bot
+  const [status, setStatus] = useState("idle"); // idle | analyzing | human | bot | logged-in
   const [mouseData, setMouseData] = useState([]);
-  const [chartData, setChartData] = useState([]); // For the visual graph
-  const [logs, setLogs] = useState(["System initialized...", "Waiting for input..."]);
-  
+  const [chartData, setChartData] = useState([]);
+  const [logs, setLogs] = useState(["System initialized...", "Waiting for user interactions..."]);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+
+  // New behavioral signals
+  const [focusEvents, setFocusEvents] = useState(0);
+  const [clipboardActions, setClipboardActions] = useState(0);
+  // Simple check: if username filled too fast from page load or very short inter-key latency (not implemented fully here but placeholder)
+  const [isAutoFill, setIsAutoFill] = useState(false);
+
   const hasSentData = useRef(false);
 
-  // Helper to add logs
-  const addLog = (msg) => setLogs(prev => [msg, ...prev].slice(0, 5));
+  const addLog = (msg) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 8));
 
+  // --- 1. Event Listeners ---
   const handleMouseMove = (e) => {
     const now = Date.now();
-    
-    // Calculate speed (simple distance formula)
+
+    // Calculate speed for graph
     let speed = 0;
     if (mouseData.length > 0) {
       const last = mouseData[mouseData.length - 1];
@@ -26,126 +34,221 @@ function App() {
       speed = Math.round(dist);
     }
 
-    // Update real data for backend
-    if (mouseData.length < 50) {
+    // Collect data (Sample every 3rd event or so to reduce noise/load in real app, here we just cap at 100)
+    if (mouseData.length < 100) {
       setMouseData(prev => [...prev, { x: e.clientX, y: e.clientY, time: now }]);
     }
 
-    // Update visual graph (keep last 20 points)
-    setChartData(prev => [...prev, { time: now, velocity: speed }].slice(-20));
+    // Graph update
+    setChartData(prev => [...prev, { time: now, velocity: speed }].slice(-30));
   };
 
-  const verifyUser = async () => {
-    if (hasSentData.current) return;
-    hasSentData.current = true;
-    addLog("Analyzing patterns...");
+  const handleFocus = () => {
+    setFocusEvents(prev => prev + 1);
+    addLog("Focus event detected");
+  };
 
+  const handlePaste = () => {
+    setClipboardActions(prev => prev + 1);
+    addLog("📋 Paste event detected (Suspicious if high frequency)");
+  };
+
+  // --- 2. Validation & Login Flow ---
+
+  const handleLogin = async () => {
+    if (!username || !password) {
+      addLog("❌ Username/Password missing");
+      return;
+    }
+
+    setStatus("analyzing");
+    addLog("Validating human behavior (Passive Check)...");
+
+    // 1. Passive Validation (POST /validate)
     const honeypotValue = document.getElementById("hp-field")?.value || "";
 
-    const payload = {
-      mouse_data: mouseData,
-      typing_speed: [], // We focus on mouse for this visual demo
-      honeypot_field: honeypotValue 
+    const validatePayload = {
+      username: username,
+      mouse_movements: mouseData.length,
+      focus_events: focusEvents,
+      clipboard_actions: clipboardActions,
+      form_autofill_patterns: isAutoFill,
+      honeypot_field: honeypotValue,
+      honeypot_clicked: false // We could track clicks on invisible button too
     };
 
     try {
-      const response = await fetch('http://127.0.0.1:5000/api/predict', {
+      const valResponse = await fetch('http://127.0.0.1:5000/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(validatePayload),
       });
-      const result = await response.json();
-      
-      if (result.is_human) {
-        setStatus("human");
-        addLog("✅ User verified as Human");
-      } else {
+
+      if (!valResponse.ok) {
+        const err = await valResponse.json();
         setStatus("bot");
-        addLog(`⚠️ BLOCK: ${result.reason}`);
+        addLog(`⚠️ BLOCKED: ${err.message}`);
+        return;
       }
+
+      addLog("✅ Human Pass. Attempting Login...");
+
+      // 2. Actual Login (POST /login)
+      const loginResponse = await fetch('http://127.0.0.1:5000/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const loginResult = await loginResponse.json();
+
+      if (loginResponse.ok) {
+        setStatus("logged-in");
+        addLog(`🎉 Login Success! Welcome ${loginResult.user}`);
+        // Trigger Deep Scan
+        runDeepScan();
+      } else {
+        setStatus("idle");
+        addLog(`❌ Login Failed: ${loginResult.message}`);
+      }
+
     } catch (error) {
-      addLog("❌ Connection Failed");
+      addLog("❌ Network Error");
+      console.error(error);
     }
   };
 
-  // Trigger verification automatically
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (mouseData.length > 10) verifyUser();
-    }, 2500);
-    return () => clearTimeout(timer);
-  }, [mouseData]);
+  // --- 3. Deep Analysis (POST /predict) ---
+  const runDeepScan = async () => {
+    addLog("🤖 Running Deep ML Analysis...");
+    try {
+      const response = await fetch('http://127.0.0.1:5000/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mouse_data: mouseData,
+          typing_speed: [] // TODO: Add typing speed array
+        }),
+      });
+      const result = await response.json();
+
+      if (result.is_human) {
+        addLog("✅ AI Confirmation: Human Behavior Verified");
+      } else {
+        setStatus("bot");
+        addLog("⚠️ AI DETECTED BOT BEHAVIOR - Session flag");
+      }
+    } catch (e) {
+      addLog("Model connection failed");
+    }
+  };
+
 
   return (
     <div className="dashboard" onMouseMove={handleMouseMove}>
-      
-      {/* LEFT SIDE: Fake Login Portal */}
+
+      {/* LEFT: Login Portal */}
       <div className="card login-section">
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <div style={{ background: '#fff', width: 60, height: 60, borderRadius: '50%', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <img src="https://upload.wikimedia.org/wikipedia/en/c/cf/Aadhaar_Logo.svg" alt="Aadhaar" width="40" />
+        <div className="logo-area">
+          <div className="logo-circle">
+            <Lock size={24} color="#2563eb" />
           </div>
-          <h2 style={{ marginTop: '1rem' }}>Resident Portal</h2>
+          <h2>Secure Portal</h2>
         </div>
 
-        {/* The Hidden Trap */}
-        <input id="hp-field" type="text" style={{ opacity: 0, position: 'absolute', width: 0 }} autoComplete="off" />
+        {/* HONEYPOT */}
+        <input
+          id="hp-field"
+          type="text"
+          style={{ opacity: 0, position: 'absolute', width: 0, height: 0, zIndex: -1 }}
+          autoComplete="off"
+          tabIndex="-1"
+        />
 
         <div className="input-group">
-          <label>Aadhaar Number / UID</label>
-          <input type="text" placeholder="Enter 12 digit UID" />
+          <label>Username</label>
+          <input
+            type="text"
+            placeholder="e.g. gurwinder"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            onFocus={handleFocus}
+            onPaste={handlePaste}
+          />
         </div>
         <div className="input-group">
-          <label>Enter Security Code</label>
-          <input type="password" placeholder="••••••" />
+          <label>Password</label>
+          <input
+            type="password"
+            placeholder="••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onFocus={handleFocus}
+          />
         </div>
-        <button className="login-btn">
-          {status === 'analyzing' ? 'Verifying...' : 'Login with OTP'}
+
+        <button className="login-btn" onClick={handleLogin}>
+          {status === 'analyzing' ? 'Verifying...' : 'Secure Login'}
         </button>
+
+        {status === 'logged-in' && (
+          <div className="success-banner">
+            Session Active
+          </div>
+        )}
       </div>
 
-      {/* RIGHT SIDE: The "Matrix" View */}
+      {/* RIGHT: Security Monitor Matrix */}
       <div className="card metrics-section">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3>🛡️ Passive Security Monitor</h3>
-          
+        <div className="metrics-header">
+          <h3><Terminal size={18} style={{ marginRight: 8 }} /> Security Monitor</h3>
+
           <div className={`status-badge ${status}`}>
-            {status === 'analyzing' && <><Activity size={18} /> Analyzing Behavior</>}
-            {status === 'human' && <><ShieldCheck size={18} /> Human Verified</>}
-            {status === 'bot' && <><ShieldAlert size={18} /> Bot Detected</>}
+            {status === 'idle' && <>Waiting...</>}
+            {status === 'analyzing' && <><Activity size={16} /> Analyzing</>}
+            {status === 'logged-in' && <><ShieldCheck size={16} /> Verified</>}
+            {status === 'bot' && <><ShieldAlert size={16} /> Threat Blocked</>}
           </div>
         </div>
 
-        <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '2rem' }}>
-          Real-time analysis of mouse velocity, jitter, and path curvature.
-        </p>
+        <div className="stats-grid">
+          <div className="stat-item">
+            <span>Mouse Events</span>
+            <strong>{mouseData.length}</strong>
+          </div>
+          <div className="stat-item">
+            <span>Focus Events</span>
+            <strong>{focusEvents}</strong>
+          </div>
+          <div className="stat-item">
+            <span>Paste Actions</span>
+            <strong>{clipboardActions}</strong>
+          </div>
+        </div>
 
-        {/* The Live Graph */}
-        <div style={{ height: 200, width: '100%' }}>
+        {/* Graph */}
+        <div className="chart-container">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData}>
               <XAxis dataKey="time" hide />
               <YAxis hide domain={[0, 100]} />
-              <Tooltip 
-                contentStyle={{ background: '#1e293b', border: 'none' }} 
-                itemStyle={{ color: '#22d3ee' }}
-              />
-              <Line 
-                type="monotone" 
-                dataKey="velocity" 
-                stroke="#22d3ee" 
-                strokeWidth={3} 
-                dot={false} 
-                animationDuration={300}
+              <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155' }} />
+              <Line
+                type="monotone"
+                dataKey="velocity"
+                stroke="#22d3ee"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
               />
             </LineChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Live Logs */}
+        {/* Logs */}
         <div className="live-feed">
           {logs.map((log, i) => (
-            <div key={i} style={{ marginBottom: 4 }}>{`> ${log}`}</div>
+            <div key={i} className="log-entry">{log}</div>
           ))}
         </div>
       </div>

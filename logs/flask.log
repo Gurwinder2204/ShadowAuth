@@ -1,0 +1,14 @@
+2026-01-30 23:49:11,894 INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2026-01-30 23:49:11,895 INFO: [33mPress CTRL+C to quit[0m
+2026-01-30 23:49:11,895 INFO:  * Restarting with stat
+2026-01-30 23:49:12,433 WARNING:  * Debugger is active!
+2026-01-30 23:49:12,436 INFO:  * Debugger PIN: 286-444-898
+2026-01-30 23:49:13,471 WARNING: Bot detected via honeypot. Target: bot_user_99
+2026-01-30 23:49:13,472 INFO: 127.0.0.1 - - [30/Jan/2026 23:49:13] "[31m[1mPOST /validate HTTP/1.1[0m" 403 -
+2026-01-30 23:49:13,475 INFO: Human behavior check passed for: gurwinder
+2026-01-30 23:49:13,475 INFO: 127.0.0.1 - - [30/Jan/2026 23:49:13] "POST /validate HTTP/1.1" 200 -
+2026-01-30 23:49:13,478 INFO: User logged in: gurwinder
+2026-01-30 23:49:13,479 INFO: 127.0.0.1 - - [30/Jan/2026 23:49:13] "POST /login HTTP/1.1" 200 -
+2026-01-30 23:49:13,483 INFO: ML Model verified HUMAN behavior for user: gurwinder
+2026-01-30 23:49:13,483 INFO: 127.0.0.1 - - [30/Jan/2026 23:49:13] "POST /predict HTTP/1.1" 200 -
